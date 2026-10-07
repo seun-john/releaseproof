@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="ReleaseProof logo" width="420">
+</p>
+
 # ReleaseProof
 
 Build a release ZIP, inspect it safely and smoke-test it in a temporary folder before you publish it.
