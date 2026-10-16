@@ -20,7 +20,7 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .core import InputError, file_digest, finding, inside, report, require
+from .core import InputError, coverage, file_digest, finding, inside, report, require
 from .redact import redact
 
 MAX_MEMBERS = 10_000
@@ -190,6 +190,27 @@ def _validate(data: dict[str, Any]) -> tuple[list[list[str]], int, dict[str, str
     return commands, timeout, expected_stdout, excludes
 
 
+def _coverage_block(
+    expectations: list[Any], commands: list[Any], runs: list[dict[str, Any]], why_not_run: str
+) -> dict[str, Any]:
+    """Required files are always checked; a smoke command counts only if it ran and finished."""
+    ran = [r for r in runs if r.get("stage") == "smoke_test"]
+    timed_out = sum(1 for r in ran if r.get("timed_out"))
+    undecided = {why_not_run: len(commands) - len(ran), "timed_out": timed_out}
+    notes = []
+    if not expectations:
+        notes.append("no required files were configured, so the archive contents were not checked")
+    if not commands:
+        notes.append("no smoke commands were configured, so nothing was run")
+    return coverage(
+        "checks",
+        len(expectations) + len(commands),
+        len(expectations) + len(commands) - sum(undecided.values()),
+        undecided,
+        notes=notes,
+    )
+
+
 def releaseproof(
     data: dict[str, Any],
     root: str | Path,
@@ -317,6 +338,7 @@ def releaseproof(
                     return report(
                         "ReleaseProof",
                         out,
+                        coverage=_coverage_block(expectations, commands, runs, "install_failed"),
                         artifact=str(artifact),
                         artifact_sha256=artifact_hash,
                         runs=runs,
@@ -366,6 +388,7 @@ def releaseproof(
     return report(
         "ReleaseProof",
         out,
+        coverage=_coverage_block(expectations, commands, runs, "not_executed"),
         artifact=str(artifact),
         artifact_sha256=artifact_hash,
         runs=runs,

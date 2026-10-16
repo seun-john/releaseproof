@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .core import VERSION, InputError, load
+from .core import VERSION, InputError, decided_share, describe_coverage, load
 
 
 @dataclass
@@ -41,6 +41,8 @@ def render_html(result: dict[str, Any]) -> str:
         for f in result["findings"]
     )
     payload = html.escape(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))
+    cov = result.get("coverage")
+    coverage_line = f"<p>{html.escape(describe_coverage(cov))}</p>" if cov else ""
     style = (
         "body{font:16px system-ui;background:#f5f7fb;color:#17253d;margin:40px auto;"
         "max-width:1100px;padding:0 20px}h1{color:#234e70}table{width:100%;"
@@ -53,6 +55,7 @@ def render_html(result: dict[str, Any]) -> str:
         '<meta name="viewport" content="width=device-width">'
         f"<title>{title} report</title><style>{style}</style>"
         f"<h1>{title}</h1><small>ReleaseProof {html.escape(VERSION)}</small>"
+        f"{coverage_line}"
         f"<table><tr><th>Status</th><th>Observation</th></tr>{rows}</table>"
         f"<h2>Evidence and scope</h2><pre>{payload}</pre></html>"
     )
@@ -74,6 +77,13 @@ def run(
             "--strict",
             action="store_true",
             help="exit 1 when any finding is not an OK status (for CI)",
+        )
+        sub.add_argument(
+            "--min-coverage",
+            type=float,
+            metavar="PCT",
+            help="exit 3 if fewer than PCT percent of items could be judged and nothing "
+            "else failed (a --strict failure still exits 1)",
         )
         for flags, kwargs in spec.options:
             sub.add_argument(*flags, **kwargs)
@@ -103,8 +113,20 @@ def run(
         if args.html:
             Path(args.html).parent.mkdir(parents=True, exist_ok=True)
             Path(args.html).write_text(render_html(result), encoding="utf-8")
+        block = result.get("coverage")
+        if block:
+            print(f"coverage: {describe_coverage(block)}", file=sys.stderr)
         if args.strict and any(f["status"] not in spec.ok for f in result["findings"]):
             return 1
+        if args.min_coverage is not None and block:
+            share = decided_share(block)
+            if share is None or share < args.min_coverage:
+                shown = "no items" if share is None else f"{share:g}% decided"
+                print(
+                    f"Coverage {shown} is below --min-coverage {args.min_coverage:g}.",
+                    file=sys.stderr,
+                )
+                return 3
         return 0
     except (InputError, ValueError, KeyError, TypeError, OSError, UnicodeError) as exc:
         print(f"Input or file error: {exc}", file=sys.stderr)

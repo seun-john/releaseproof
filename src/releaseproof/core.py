@@ -109,6 +109,55 @@ def report(tool: str, findings: list[dict[str, Any]], **extra: Any) -> dict[str,
     }
 
 
+def coverage(
+    unit: str,
+    items: int,
+    decided: int,
+    reasons: dict[str, int] | None = None,
+    suppressed: int = 0,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    """The shared coverage block: how much the tool could judge, and why not.
+
+    `decided + undecided == items` and the reasons add up to `undecided`; a tool that breaks
+    that has a bug, so it raises instead of reporting numbers that do not add up.
+    `suppressed` counts matches left out on purpose (allow lists, disabled rules); they are
+    not items.
+    """
+    kept = {k: v for k, v in sorted((reasons or {}).items()) if v}
+    undecided = items - decided
+    if not 0 <= decided <= items or sum(kept.values()) != undecided:
+        raise RuntimeError(
+            f"inconsistent coverage: {items} items, {decided} decided, reasons {kept}"
+        )
+    return {
+        "unit": unit,
+        "items": items,
+        "decided": decided,
+        "undecided": undecided,
+        "reasons": kept,
+        "suppressed": suppressed,
+        "notes": list(notes or []),
+    }
+
+
+def decided_share(block: dict[str, Any]) -> float | None:
+    """Percent of items decided, or None when there were no items."""
+    items = block["items"]
+    return round(100 * block["decided"] / items, 1) if items else None
+
+
+def describe_coverage(block: dict[str, Any]) -> str:
+    """One line for people: `decided 20 of 33 checks; 13 could not be checked (reason 9, ...)`."""
+    text = f"decided {block['decided']} of {block['items']} {block['unit']}"
+    if block["undecided"]:
+        why = ", ".join(
+            f"{k} {v}" for k, v in sorted(block["reasons"].items(), key=lambda kv: -kv[1])
+        )
+        text += f"; {block['undecided']} could not be checked ({why})"
+    return text
+
+
 def norm(value: Any) -> str:
     """Case-folded text with punctuation and runs of whitespace collapsed."""
     return re.sub(r"\W+", " ", str(value).casefold()).strip()

@@ -56,7 +56,9 @@ Commands only run when you use `test` (or `build`) **and** pass `--allow-executi
 | `FAIL`, `TIMEOUT` | A file check, command or output assertion failed, or a command ran out of time. |
 | `NOT_EXECUTED`, `NO_SMOKE_TESTS`, `NO_EXPECTATIONS` | Nothing was run or required, so the release cannot be called ready. |
 
-All commands take `-o report.json`, `--html report.html` and `--strict` (exit 1 on anything other than `PASS` or `BUILT`). Exit codes: 0 completed, 1 strict findings, 2 unusable input or an unsafe archive.
+All commands take `-o report.json`, `--html report.html` and `--strict` (exit 1 on anything other than `PASS` or `BUILT`). Exit codes: 0 completed, 1 strict findings, 2 unusable input or an unsafe archive, 3 `--min-coverage` was not met.
+
+**Coverage.** The report has a `coverage` object and a line on stderr, for example `coverage: decided 5 of 6 checks; 1 could not be checked (not_executed 1)`. The items are the required files plus the smoke commands. Required files are always checked. A smoke command is decided only if it ran and finished: one that was not run (`not_executed`, because you did not pass `--allow-execution` or used `inspect`), could not run because the wheel failed to install (`install_failed`), or timed out (`timed_out`) is undecided. A command that ran and failed is decided. The `notes` say when no required files or no commands were configured. `--min-coverage PCT` exits 3 when fewer than PCT percent of items were decided and nothing else failed.
 
 ## Limits
 

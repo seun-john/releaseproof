@@ -191,6 +191,60 @@ def test_commands_do_not_run_without_permission(project: Path, tmp_path: Path) -
     assert "NOT_EXECUTED" in statuses(result) and result["release_ready"] is False
 
 
+def test_coverage_counts_commands_that_were_not_run(project: Path, tmp_path: Path) -> None:
+    data = {"expected_files": ["app.py"], "commands": [["{python}", "app.py"]]}
+    block = releaseproof(data, project, "build", tmp_path / "rel.zip")["coverage"]
+    assert (block["unit"], block["items"], block["decided"], block["undecided"]) == (
+        "checks",
+        2,
+        1,
+        1,
+    )
+    assert block["reasons"] == {"not_executed": 1}
+    assert block["decided"] + block["undecided"] == block["items"]
+
+
+def test_coverage_when_everything_ran_and_a_command_failed(project: Path, tmp_path: Path) -> None:
+    ok = smoke(project, tmp_path, [["{python}", "app.py"]])["coverage"]
+    assert (ok["items"], ok["decided"], ok["undecided"], ok["reasons"]) == (2, 2, 0, {})
+    (tmp_path / "rel.zip").unlink()
+    failed = smoke(project, tmp_path, [["{python}", "-c", "raise SystemExit(3)"]])["coverage"]
+    assert (failed["decided"], failed["undecided"]) == (2, 0)  # a failure is still a verdict
+
+
+def test_coverage_counts_a_timeout_as_undecided(project: Path, tmp_path: Path) -> None:
+    sleeper = [["{python}", "-c", "import time; time.sleep(30)"]]
+    block = smoke(project, tmp_path, sleeper, timeout_seconds=1)["coverage"]
+    assert (block["items"], block["decided"], block["undecided"]) == (2, 1, 1)
+    assert block["reasons"] == {"timed_out": 1}
+
+
+def test_coverage_says_when_nothing_was_configured(project: Path, tmp_path: Path) -> None:
+    block = build(project, tmp_path)["coverage"]
+    assert (block["items"], block["decided"], block["undecided"]) == (0, 0, 0)
+    assert len(block["notes"]) == 2
+
+
+def test_cli_min_coverage_when_commands_were_not_run(
+    project: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spec = tmp_path / "spec.json"
+    spec.write_text(
+        json.dumps({"expected_files": ["app.py"], "commands": [["{python}", "app.py"]]}),
+        encoding="utf-8",
+    )
+    base = ["build", str(spec), "--root", str(project), "-o", str(tmp_path / "o.json")]
+    assert main([*base, "--archive", str(tmp_path / "a.zip"), "--min-coverage", "50"]) == 0
+    assert "coverage: decided 1 of 2 checks; 1 could not be checked (not_executed 1)" in (
+        capsys.readouterr().err
+    )
+    assert main([*base, "--archive", str(tmp_path / "b.zip"), "--min-coverage", "51"]) == 3
+    assert (
+        main([*base, "--archive", str(tmp_path / "c.zip"), "--strict", "--min-coverage", "100"])
+        == 1
+    )
+
+
 def test_passing_smoke_test_makes_the_release_ready(project: Path, tmp_path: Path) -> None:
     result = smoke(
         project, tmp_path, [["{python}", "app.py"]], expected_stdout={"0": "Hello from app"}
