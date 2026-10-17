@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .content import run_checks, validate_checks
 from .core import InputError, coverage, file_digest, finding, inside, report, require
 from .redact import redact
 
@@ -191,24 +192,27 @@ def _validate(data: dict[str, Any]) -> tuple[list[list[str]], int, dict[str, str
 
 
 def _coverage_block(
-    expectations: list[Any], commands: list[Any], runs: list[dict[str, Any]], why_not_run: str
+    expectations: list[Any],
+    commands: list[Any],
+    runs: list[dict[str, Any]],
+    why_not_run: str,
+    content: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Required files are always checked; a smoke command counts only if it ran and finished."""
+    """Required files are always checked; a smoke command counts only if it ran and finished;
+    a content check counts unless its inputs were missing or not recognised."""
+    content = content or []
     ran = [r for r in runs if r.get("stage") == "smoke_test"]
     timed_out = sum(1 for r in ran if r.get("timed_out"))
+    unchecked = sum(1 for f in content if f["status"] == "UNCHECKED")
     undecided = {why_not_run: len(commands) - len(ran), "timed_out": timed_out}
+    undecided["inputs_missing"] = unchecked
     notes = []
     if not expectations:
         notes.append("no required files were configured, so the archive contents were not checked")
     if not commands:
         notes.append("no smoke commands were configured, so nothing was run")
-    return coverage(
-        "checks",
-        len(expectations) + len(commands),
-        len(expectations) + len(commands) - sum(undecided.values()),
-        undecided,
-        notes=notes,
-    )
+    items = len(expectations) + len(commands) + len(content)
+    return coverage("checks", items, items - sum(undecided.values()), undecided, notes=notes)
 
 
 def releaseproof(
@@ -221,6 +225,8 @@ def releaseproof(
     if action not in ("build", "inspect", "test"):
         raise InputError("action must be build, inspect or test")
     commands, timeout, expected_stdout, user_excludes = _validate(data)
+    content_checks = validate_checks(data.get("checks", []))
+    content_findings: list[dict[str, Any]] = []
     base = Path(root).resolve()
     out: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
@@ -293,6 +299,8 @@ def releaseproof(
             )
         if not expectations:
             out.append(finding("NO_EXPECTATIONS", "No required files were configured."))
+        content_findings = run_checks(package, content_checks)
+        out.extend(content_findings)
 
         should_run = allow_execution and action != "inspect"
         if commands and not should_run:
@@ -338,7 +346,9 @@ def releaseproof(
                     return report(
                         "ReleaseProof",
                         out,
-                        coverage=_coverage_block(expectations, commands, runs, "install_failed"),
+                        coverage=_coverage_block(
+                            expectations, commands, runs, "install_failed", content_findings
+                        ),
                         artifact=str(artifact),
                         artifact_sha256=artifact_hash,
                         runs=runs,
@@ -388,7 +398,7 @@ def releaseproof(
     return report(
         "ReleaseProof",
         out,
-        coverage=_coverage_block(expectations, commands, runs, "not_executed"),
+        coverage=_coverage_block(expectations, commands, runs, "not_executed", content_findings),
         artifact=str(artifact),
         artifact_sha256=artifact_hash,
         runs=runs,

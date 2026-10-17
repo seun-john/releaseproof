@@ -48,6 +48,36 @@ releaseproof test spec.json --root . --allow-execution     # smoke-test an exist
 
 Commands only run when you use `test` (or `build`) **and** pass `--allow-execution`. Otherwise the report says `NOT_EXECUTED`.
 
+**Content checks** run on the unpacked release, never execute anything, and are listed under `checks` in the spec:
+
+```json
+{"checks": [
+  {"check": "json_valid"},
+  {"check": "max_file_bytes", "bytes": 102400},
+  {"check": "no_todo_markers", "extensions": [".py", ".js"]},
+  {"check": "no_hardcoded_credentials", "placeholders": ["acme-demo"]},
+  {"check": "no_absolute_paths", "under": "config"},
+  {"check": "dependencies_pinned", "file": "requirements.txt"},
+  {"check": "license_matches", "metadata": "datapackage.json", "license_file": "LICENSE"},
+  {"check": "version_matches_changelog", "metadata": "pyproject.toml", "changelog": "CHANGELOG.md"},
+  {"check": "row_counts_match", "metadata": "datapackage.json"}
+]}
+```
+
+| Check | Passes when |
+| --- | --- |
+| `json_valid` | every `.json` file parses (a byte order mark is accepted) |
+| `max_file_bytes` | no file is larger than `bytes` |
+| `no_todo_markers` | no `TODO`, `FIXME` or `XXX` in files with the listed extensions (default: `.py .js .ts .jsx .tsx .mjs .cjs`); prose files are not looked at |
+| `no_hardcoded_credentials` | no private key, JWT, prefixed token (`sk-`, `ghp_`, `AKIA`...), `Authorization: Bearer` value, or `password` / `secret` / `token` / `api_key` assignment whose value is 8+ characters with a digit or symbol and is not a placeholder (`changeme`, `example`, `sample`, `<...>`, `${...}`, `****`, and any word you list under `placeholders`). The report names the file and line, never the value |
+| `no_absolute_paths` | no file under `under` contains `C:\...`, `/home/...`, `/Users/...` or `/root/...` |
+| `dependencies_pinned` | every requirement is pinned with `==` (comments, `-r` and option lines are skipped) |
+| `license_matches` | the licence the metadata declares (JSON `license` or `licenses`, TOML or YAML `license`, or an SPDX id in a `copyright` line) is the licence the text of `license_file` reads as. It recognises MIT, Apache-2.0, BSD-2/3-Clause, GPL-2.0/3.0, LGPL-3.0, MPL-2.0, ISC, Unlicense, CC0 and CC-BY variants |
+| `version_matches_changelog` | the metadata `version` equals the newest version heading in the changelog (`[Unreleased]` has no version and is skipped) |
+| `row_counts_match` | every resource in `datapackage.json` that states `rows` has that many data rows in its CSV (blank lines do not count) |
+
+Each check gives `PASS` or `FAIL`. When its inputs are missing or not recognised (no changelog, a licence text it cannot identify, a folder that is not in the release) it gives `UNCHECKED` with the reason, which keeps `release_ready` false and counts as undecided in the coverage. The credential and licence checks are heuristics: a clean result means nothing matched, not that the release is safe, and an unusual licence text will come back `UNCHECKED` rather than guessed.
+
 `release_ready` is true only when files were expected, commands were configured and run, and every finding passed. It means "these checks passed on this computer". It is not a guarantee of correct behaviour or of compatibility with other systems.
 
 | Finding | Meaning |
@@ -55,6 +85,7 @@ Commands only run when you use `test` (or `build`) **and** pass `--allow-executi
 | `BUILT`, `PASS` | The step succeeded. |
 | `FAIL`, `TIMEOUT` | A file check, command or output assertion failed, or a command ran out of time. |
 | `NOT_EXECUTED`, `NO_SMOKE_TESTS`, `NO_EXPECTATIONS` | Nothing was run or required, so the release cannot be called ready. |
+| `UNCHECKED` | A content check could not run because its inputs were missing or not recognised. |
 
 All commands take `-o report.json`, `--html report.html` and `--strict` (exit 1 on anything other than `PASS` or `BUILT`). Exit codes: 0 completed, 1 strict findings, 2 unusable input or an unsafe archive, 3 `--min-coverage` was not met.
 
